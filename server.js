@@ -30,19 +30,14 @@ app.get('/api/messages', async (req, res) => {
       }
     );
 
+    const botId = botInfo.data.result.id;
+
     const messages = response.data.result
-      .filter(update => update.message && update.message.chat.id.toString() === CHAT_ID)
+      .filter(update => update.message && update.message.chat.id.toString() === CHAT_ID && update.message.from.id === botId)
       .map(update => {
         const msg = update.message;
-        const user = msg.from;
         return {
           id: msg.message_id,
-          user: {
-            id: user.id,
-            first_name: user.first_name || '',
-            last_name: user.last_name || '',
-            username: user.username || ''
-          },
           text: msg.text || msg.caption || '[Media Message]',
           date: msg.date,
           reply_to: msg.reply_to_message ? {

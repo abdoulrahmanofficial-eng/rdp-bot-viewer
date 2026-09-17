@@ -30,10 +30,6 @@ function escapeHtml(text) {
 }
 
 function renderMessage(msg) {
-    const fullName = `${msg.user.first_name} ${msg.user.last_name}`.trim();
-    const username = msg.user.username ? `@${msg.user.username}` : '';
-    const initial = getInitials(fullName || 'U');
-
     let replyHtml = '';
     if (msg.reply_to) {
         replyHtml = `
@@ -48,13 +44,8 @@ function renderMessage(msg) {
         <div class="message" data-id="${msg.id}">
             <div class="message-header">
                 <div class="message-user">
-                    <div class="user-avatar">${initial}</div>
-                    <div>
-                        <div class="user-name">${escapeHtml(fullName)}</div>
-                        ${username ? `<div class="user-username">${escapeHtml(username)}</div>` : ''}
-                    </div>
+                    <div class="message-time">${formatTime(msg.date)}</div>
                 </div>
-                <div class="message-time">${formatTime(msg.date)}</div>
             </div>
             ${replyHtml}
             <div class="message-text">${escapeHtml(msg.text)}</div>
