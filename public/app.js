@@ -5,7 +5,6 @@ const autoRefreshCheckbox = document.getElementById('autoRefresh');
 const botInfoEl = document.getElementById('botInfo');
 const statsEl = document.getElementById('stats');
 
-let lastUpdateId = 0;
 let autoRefreshInterval = null;
 
 function formatTime(timestamp) {
@@ -19,10 +18,6 @@ function formatTime(timestamp) {
     });
 }
 
-function getInitials(name) {
-    return name.charAt(0).toUpperCase();
-}
-
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -30,24 +25,18 @@ function escapeHtml(text) {
 }
 
 function renderMessage(msg) {
-    let replyHtml = '';
-    if (msg.reply_to) {
-        replyHtml = `
-            <div class="reply">
-                <div class="reply-user">رد على رسالة</div>
-                <div class="reply-text">${escapeHtml(msg.reply_to.text.substring(0, 100))}${msg.reply_to.text.length > 100 ? '...' : ''}</div>
-            </div>
-        `;
-    }
+    const isBot = msg.from === 'bot';
+    const msgClass = isBot ? 'message bot-message' : 'message user-message';
+    const label = isBot ? 'Bot' : 'You';
 
     return `
-        <div class="message" data-id="${msg.id}">
+        <div class="${msgClass}" data-id="${msg.id}">
             <div class="message-header">
                 <div class="message-user">
-                    <div class="message-time">${formatTime(msg.date)}</div>
+                    <span class="message-label ${isBot ? 'label-bot' : 'label-user'}">${label}</span>
                 </div>
+                <div class="message-time">${formatTime(msg.date)}</div>
             </div>
-            ${replyHtml}
             <div class="message-text">${escapeHtml(msg.text)}</div>
         </div>
     `;
@@ -58,15 +47,11 @@ async function fetchMessages() {
         refreshBtn.disabled = true;
         refreshBtn.textContent = 'جاري التحديث...';
 
-        const response = await fetch(`/api/messages?limit=100`);
+        const response = await fetch('/api/messages?limit=100');
         const data = await response.json();
 
         if (!data.ok) {
             throw new Error(data.error || 'Failed to fetch messages');
-        }
-
-        if (data.bot) {
-            botInfoEl.textContent = `Bot: ${data.bot.first_name} (${data.bot.username})`;
         }
 
         if (data.messages.length === 0) {
@@ -74,20 +59,18 @@ async function fetchMessages() {
                 <div class="no-messages">
                     <div class="icon">💬</div>
                     <h3>لا توجد رسائل</h3>
-                    <p>لم يتم العثور على رسائل في هذا الشات</p>
+                    <p>ابعت رسالة للبوت وهيظهر هنا</p>
                 </div>
             `;
             statsEl.textContent = '';
+            botInfoEl.textContent = 'في انتظار الرسائل...';
             return;
         }
 
         messagesContainer.innerHTML = data.messages.map(renderMessage).join('');
 
-        if (data.messages.length > 0) {
-            lastUpdateId = data.messages[data.messages.length - 1].update_id;
-        }
-
         statsEl.textContent = `إجمالي الرسائل: ${data.total}`;
+        botInfoEl.textContent = `آخر تحديث: ${new Date().toLocaleTimeString('ar-EG')}`;
 
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     } catch (error) {
@@ -105,9 +88,7 @@ async function fetchMessages() {
 }
 
 function startAutoRefresh() {
-    if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-    }
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
     autoRefreshInterval = setInterval(fetchMessages, 5000);
 }
 

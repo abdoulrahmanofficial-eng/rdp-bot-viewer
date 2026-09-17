@@ -33,11 +33,14 @@ app.get('/api/messages', async (req, res) => {
     const botId = botInfo.data.result.id;
 
     const messages = response.data.result
-      .filter(update => update.message && update.message.chat.id.toString() === CHAT_ID && update.message.from.id === botId)
+      .filter(update => update.message && update.message.chat.id.toString() === CHAT_ID)
       .map(update => {
         const msg = update.message;
+        const isBot = msg.from.id === botId;
         return {
           id: msg.message_id,
+          from: isBot ? 'bot' : 'user',
+          userName: msg.from.first_name || msg.from.username || 'User',
           text: msg.text || msg.caption || '[Media Message]',
           date: msg.date,
           reply_to: msg.reply_to_message ? {
