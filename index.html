@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[ RDP COMMAND CENTER ]</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="matrix"></canvas>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+
+    <div class="container">
+        <header>
+            <div class="glitch-wrapper">
+                <h1 data-text="[ RDP COMMAND CENTER ]">[ RDP COMMAND CENTER ]</h1>
+            </div>
+            <div class="status-bar">
+                <span class="blink">●</span>
+                <span id="statusText">SYSTEM ONLINE</span>
+                <span class="separator">|</span>
+                <span id="currentTime"></span>
+                <span class="separator">|</span>
+                <span class="threat-level">THREAT LEVEL: <span class="red blink">MAXIMUM</span></span>
+            </div>
+            <div class="controls">
+                <button id="refreshBtn" class="btn btn-hacker">
+                    <span class="btn-text">↻ REFRESH DATA</span>
+                </button>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="autoRefresh" checked>
+                    <span class="slider"></span>
+                    <span class="toggle-label">AUTO-SCAN</span>
+                </label>
+                <div class="hack-progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <span class="progress-text" id="progressText">SCANNING...</span>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="terminal">
+                <div class="terminal-header">
+                    <div class="terminal-dots">
+                        <span class="dot red"></span>
+                        <span class="dot yellow"></span>
+                        <span class="dot green"></span>
+                    </div>
+                    <span class="terminal-title">root@rdp-command:~# intercept_messages</span>
+                </div>
+                <div class="messages-container" id="messagesContainer">
+                    <div class="loading" id="loading">
+                        <span class="typing">INITIALIZING HACK SEQUENCE</span>
+                        <span class="dots">...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="stat-label">PACKETS:</span>
+                    <span class="stat-value" id="totalPackets">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">LATENCY:</span>
+                    <span class="stat-value" id="latency">0ms</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">ENCRYPTION:</span>
+                    <span class="stat-value green">AES-256</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">PROXY:</span>
+                    <span class="stat-value">TOR</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
