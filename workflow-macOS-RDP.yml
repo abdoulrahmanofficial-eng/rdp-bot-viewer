@@ -1,0 +1,1045 @@
+name: macOS RDP - Abdulrahman
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 350
+
+    steps:
+
+      # =========================================================
+      # 1. SYSTEM INFORMATION
+      # =========================================================
+      - name: System Information
+        shell: bash
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "SYSTEM INFORMATION"
+          echo "=================================================="
+
+          echo
+          echo "===== macOS ====="
+          sw_vers
+
+          echo
+          echo "===== PROCESS USER ====="
+          whoami
+
+          echo
+          echo "===== CONSOLE USER ====="
+          stat -f "%Su" /dev/console
+
+          echo
+          echo "===== LOGIN SESSIONS ====="
+          who || true
+
+          echo
+          echo "===== WINDOWSERVER ====="
+          pgrep -fl WindowServer || true
+
+          echo
+          echo "===== LOGINWINDOW ====="
+          pgrep -fl loginwindow || true
+
+      # =========================================================
+      # 2. CREATE / VERIFY ADMIN USER
+      # =========================================================
+      - name: Create Administrator User
+        shell: bash
+        env:
+          MACOS_USERNAME: ${{ secrets.MACOS_USERNAME }}
+          MACOS_PASSWORD: ${{ secrets.MACOS_PASSWORD }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "CREATE / VERIFY ADMINISTRATOR USER"
+          echo "=================================================="
+
+          echo
+          echo "Target username:"
+          echo "$MACOS_USERNAME"
+
+          if id "$MACOS_USERNAME" >/dev/null 2>&1; then
+            echo "User already exists."
+          else
+            echo "Creating user..."
+
+            sudo sysadminctl \
+              -addUser "$MACOS_USERNAME" \
+              -fullName "$MACOS_USERNAME" \
+              -password "$MACOS_PASSWORD"
+
+            echo "User created."
+          fi
+
+          TARGET_UID=$(id -u "$MACOS_USERNAME")
+
+          echo
+          echo "===== USER INFO ====="
+          id "$MACOS_USERNAME"
+
+          echo
+          echo "===== UID ====="
+          echo "$TARGET_UID"
+
+      # =========================================================
+      # 3. ADMIN GROUP
+      # =========================================================
+      - name: Configure Administrator Group
+        shell: bash
+        env:
+          MACOS_USERNAME: ${{ secrets.MACOS_USERNAME }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "CONFIGURE ADMINISTRATOR GROUP"
+          echo "=================================================="
+
+          sudo dseditgroup \
+            -o edit \
+            -a "$MACOS_USERNAME" \
+            -t user \
+            admin
+
+          echo
+          echo "===== USER GROUPS ====="
+          id "$MACOS_USERNAME"
+
+          echo
+          echo "===== ADMIN MEMBERSHIP ====="
+
+          dseditgroup \
+            -o checkmember \
+            -m "$MACOS_USERNAME" \
+            admin
+
+      # =========================================================
+      # 4. VERIFY ADMINISTRATION
+      # =========================================================
+      - name: Verify Administrator Access
+        shell: bash
+        env:
+          MACOS_USERNAME: ${{ secrets.MACOS_USERNAME }}
+          MACOS_PASSWORD: ${{ secrets.MACOS_PASSWORD }}
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "VERIFY ADMINISTRATOR ACCESS"
+          echo "=================================================="
+
+          echo
+          echo "===== ID ====="
+          id "$MACOS_USERNAME"
+
+          echo
+          echo "===== ADMIN CHECK ====="
+
+          dseditgroup \
+            -o checkmember \
+            -m "$MACOS_USERNAME" \
+            admin
+
+          ADMIN_EXIT=$?
+
+          echo
+          echo "Admin membership exit:"
+          echo "$ADMIN_EXIT"
+
+          if [ "$ADMIN_EXIT" -ne 0 ]; then
+            echo
+            echo "ERROR: Target user is not an administrator."
+            exit 1
+          fi
+
+          echo
+          echo "Administrator membership: PASS"
+
+          echo
+          echo "===== SUDO POLICY ====="
+
+          sudo -l \
+            -U "$MACOS_USERNAME" \
+            2>&1 || true
+
+          echo
+          echo "===== SUDOERS ====="
+
+          sudo -l \
+            -U "$MACOS_USERNAME" \
+            2>&1 || true
+
+      # =========================================================
+      # 5. PREPARE TAILSCALE
+      # =========================================================
+      - name: Install Tailscale
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "INSTALL TAILSCALE"
+          echo "=================================================="
+
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+          if command -v brew >/dev/null 2>&1; then
+            echo "Homebrew already installed."
+          else
+            echo "Installing Homebrew..."
+
+            NONINTERACTIVE=1 /bin/bash -c \
+              "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+          brew install --quiet tailscale || true
+
+          echo
+          echo "===== TAILSCALE ====="
+          tailscale version
+
+      # =========================================================
+      # 6. START TAILSCALE
+      # =========================================================
+      - name: Start Tailscale
+        shell: bash
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "START TAILSCALE"
+          echo "=================================================="
+
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+          if pgrep -x tailscaled >/dev/null 2>&1; then
+            echo "tailscaled already running."
+          else
+            sudo tailscaled \
+              --state=/tmp/tailscale-state \
+              > /tmp/tailscaled.log 2>&1 &
+
+            echo "tailscaled PID: $!"
+
+            sleep 5
+          fi
+
+          echo
+          echo "===== TAILSCALE UP ====="
+
+          sudo tailscale up \
+            --authkey="$TAILSCALE_AUTH_KEY" \
+            --hostname="github-macos-rdp"
+
+          echo
+          echo "===== STATUS ====="
+
+          sudo tailscale status
+
+          echo
+          echo "===== IP ====="
+
+          TAILSCALE_IP=$(
+            sudo tailscale ip -4 2>/dev/null |
+            head -n 1
+          )
+
+          if [ -z "$TAILSCALE_IP" ]; then
+            echo "ERROR: No Tailscale IP."
+            exit 1
+          fi
+
+          echo "$TAILSCALE_IP" > /tmp/tailscale_ip
+
+          echo
+          echo "RDP ADDRESS:"
+          echo "$TAILSCALE_IP:3390"
+
+      # =========================================================
+      # 7. INSTALL RUST
+      # =========================================================
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "INSTALL RUST"
+          echo "=================================================="
+
+          if command -v rustc >/dev/null 2>&1; then
+            echo "Rust already installed."
+          else
+            curl \
+              --proto '=https' \
+              --tlsv1.2 \
+              -sSf https://sh.rustup.rs \
+              | sh -s -- -y
+          fi
+
+          source "$HOME/.cargo/env"
+
+          rustc --version
+          cargo --version
+
+      # =========================================================
+      # 8. CLONE MACRDP
+      # =========================================================
+      - name: Clone macrdp
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "CLONE MACRDP"
+          echo "=================================================="
+
+          rm -rf "$HOME/macrdp"
+
+          git clone \
+            https://github.com/clintcan/macrdp.git \
+            "$HOME/macrdp"
+
+          cd "$HOME/macrdp"
+
+          git status
+
+      # =========================================================
+      # 9. BUILD MACRDP
+      # =========================================================
+      - name: Build macrdp
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "BUILD MACRDP"
+          echo "=================================================="
+
+          source "$HOME/.cargo/env"
+
+          cd "$HOME/macrdp"
+
+          cargo build --release
+
+          echo
+          echo "===== BUILD OUTPUT ====="
+
+          ls -lh \
+            target/release/macrdp
+
+      # =========================================================
+      # 10. INSTALL MACRDP
+      # =========================================================
+      - name: Install macrdp
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "INSTALL MACRDP"
+          echo "=================================================="
+
+          sudo cp \
+            "$HOME/macrdp/target/release/macrdp" \
+            /usr/local/bin/macrdp
+
+          sudo chmod +x \
+            /usr/local/bin/macrdp
+
+          echo
+          echo "===== MACRDP HELP ====="
+
+          /usr/local/bin/macrdp --help
+
+      # =========================================================
+      # 11. PREPARE MACRDP LOG
+      # =========================================================
+      - name: Prepare macrdp
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "PREPARE MACRDP"
+          echo "=================================================="
+
+          rm -rf /tmp/macrdp
+
+          mkdir -p /tmp/macrdp
+
+      # =========================================================
+      # 12. START MACRDP
+      # =========================================================
+      - name: Start macrdp
+        shell: bash
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "START MACRDP"
+          echo "=================================================="
+
+          /usr/local/bin/macrdp \
+            --bind 0.0.0.0:3390 \
+            --username "${{ secrets.MACOS_USERNAME }}" \
+            --password "${{ secrets.MACOS_PASSWORD }}" \
+            --enable-h264 \
+            --fps 60 \
+            --bitrate 8 \
+            --keyframe-interval 2 \
+            --flush-frames 4 \
+            --virtual-display \
+            --width 1920 \
+            --height 1080 \
+            --log-dir /tmp/macrdp \
+            --verbose \
+            > /tmp/macrdp/console.log 2>&1 &
+
+          PID=$!
+
+          echo "$PID" > /tmp/macrdp.pid
+
+          echo
+          echo "macrdp PID:"
+          echo "$PID"
+
+          echo
+          echo "Waiting for port 3390..."
+
+          READY=0
+
+          for i in $(seq 1 30); do
+
+            if ! kill -0 "$PID" 2>/dev/null; then
+
+              echo
+              echo "ERROR: macrdp exited."
+
+              echo
+              echo "===== LAST 100 LOG LINES ====="
+
+              tail -100 \
+                /tmp/macrdp/console.log \
+                2>/dev/null || true
+
+              exit 1
+            fi
+
+            if lsof \
+              -nP \
+              -iTCP:3390 \
+              -sTCP:LISTEN \
+              >/tmp/macrdp/port.txt \
+              2>&1; then
+
+              READY=1
+
+              echo
+              echo "PORT 3390 IS READY."
+
+              cat /tmp/macrdp/port.txt
+
+              break
+            fi
+
+            sleep 2
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo
+            echo "ERROR: Port 3390 did not open."
+
+            echo
+            echo "===== LAST 100 LOG LINES ====="
+
+            tail -100 \
+              /tmp/macrdp/console.log \
+              2>/dev/null || true
+
+            exit 1
+          fi
+
+          echo
+          echo "macRDP is READY."
+
+      # =========================================================
+      # 13. SEND TELEGRAM ONLINE + LOG TO WEBSITE
+      # =========================================================
+      - name: Send Telegram RDP Online
+        shell: bash
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "SEND TELEGRAM ONLINE"
+          echo "=================================================="
+
+          IP=$(cat /tmp/tailscale_ip)
+
+          if [ -z "$IP" ]; then
+            echo "ERROR: Tailscale IP not found."
+            exit 1
+          fi
+
+          REPLY_MARKUP=$(python3 - "$IP" <<'PY'
+          import json
+          import sys
+
+          ip = sys.argv[1]
+
+          data = {
+              "inline_keyboard": [
+                  [
+                      {
+                          "text": "📋 Copy IP",
+                          "copy_text": {
+                              "text": ip
+                          }
+                      },
+                      {
+                          "text": "📋 Copy RDP",
+                          "copy_text": {
+                              "text": f"{ip}:3390"
+                          }
+                      }
+                  ]
+              ]
+          }
+
+          print(json.dumps(data, ensure_ascii=False))
+          PY
+          )
+
+          TELEGRAM_TEXT=$(cat <<EOF
+          🟢 macOS RDP READY
+
+          IP: $IP
+          RDP: $IP:3390
+          Host: github-macos-rdp
+
+          Status: ONLINE
+          EOF
+          )
+
+          RESPONSE=$(
+            curl -fsS \
+              -X POST \
+              "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=${TELEGRAM_TEXT}" \
+              --data-urlencode "reply_markup=${REPLY_MARKUP}"
+          )
+
+          echo "$RESPONSE"
+
+          MSG_ID=$(
+            python3 - "$RESPONSE" <<'PY'
+          import json
+          import sys
+
+          response = json.loads(sys.argv[1])
+
+          if not response.get("ok"):
+              raise SystemExit("Telegram API returned an error.")
+
+          print(response["result"]["message_id"])
+          PY
+          )
+
+          echo "$MSG_ID" > /tmp/telegram_message_id
+
+          echo
+          echo "Telegram message ID:"
+          echo "$MSG_ID"
+
+          echo
+          echo "=================================================="
+          echo "LOG TO WEBSITE"
+          echo "=================================================="
+
+          LOG_TEXT=$(cat <<EOF
+          🟢 macOS RDP READY
+
+          IP: ${IP}
+          RDP: ${IP}:3390
+          Host: github-macos-rdp
+
+          Status: ONLINE
+
+          ─────────────────────
+          📋 Copy IP: ${IP}
+          📋 Copy RDP: ${IP}:3390
+          ─────────────────────
+          EOF
+          )
+
+          curl -sS \
+            -X POST \
+            "https://rdp-bot-viewer.vercel.app/api/log" \
+            -H "Content-Type: application/json" \
+            -d "$(python3 - "$LOG_TEXT" <<'PY'
+          import json
+          import sys
+
+          text = sys.argv[1].strip()
+          print(json.dumps({"text": text}))
+          PY
+          )" \
+            || echo "Warning: Failed to log to website"
+
+      # =========================================================
+      # 14. VERIFY GUI + ADMIN USER
+      # =========================================================
+      - name: Verify GUI And Administrator
+        shell: bash
+        env:
+          MACOS_USERNAME: ${{ secrets.MACOS_USERNAME }}
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "VERIFY GUI AND ADMINISTRATOR"
+          echo "=================================================="
+
+          echo
+          echo "===== ACTIVE GUI USER ====="
+          stat -f "%Su" /dev/console
+
+          echo
+          echo "===== LOGIN SESSIONS ====="
+          who || true
+
+          echo
+          echo "===== TARGET USER ====="
+          id "$MACOS_USERNAME"
+
+          echo
+          echo "===== ADMIN MEMBERSHIP ====="
+
+          dseditgroup \
+            -o checkmember \
+            -m "$MACOS_USERNAME" \
+            admin
+
+          echo
+          echo "===== MACRDP ====="
+          pgrep -fl macrdp || true
+
+          echo
+          echo "===== PORT 3390 ====="
+
+          lsof \
+            -nP \
+            -iTCP:3390 \
+            -sTCP:LISTEN \
+            2>&1 || true
+
+          echo
+          echo "===== TAILSCALE IP ====="
+          cat /tmp/tailscale_ip
+
+          echo
+          echo "=================================================="
+          echo "RDP CONNECTION"
+          echo "=================================================="
+
+          echo
+          echo "PC:"
+          cat /tmp/tailscale_ip
+
+          echo ":3390"
+
+          echo
+          echo "RDP username:"
+          echo "$MACOS_USERNAME"
+
+          echo
+          echo "RDP password:"
+          echo "Use the MACOS_PASSWORD secret."
+
+          echo
+          echo "IMPORTANT:"
+          echo "Do NOT use Switch User."
+
+      # =========================================================
+      # 15. KEEP RUNNER GUI ALIVE
+      # =========================================================
+      - name: Keep RDP Alive
+        shell: bash
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "RDP SESSION ACTIVE"
+          echo "=================================================="
+
+          END=$((SECONDS + 20400))
+
+          while [ "$SECONDS" -lt "$END" ]; do
+
+            REMAINING=$((END - SECONDS))
+
+            echo
+            echo "=================================================="
+            echo "STATUS"
+            echo "=================================================="
+
+            echo
+            echo "Remaining:"
+            echo "$REMAINING seconds"
+
+            echo
+            echo "Console:"
+            stat -f "%Su" /dev/console
+
+            echo
+            echo "GUI sessions:"
+            who || true
+
+            echo
+            echo "===== MACRDP ====="
+            pgrep -fl macrdp || true
+
+            echo
+            echo "===== PORT 3390 ====="
+
+            lsof \
+              -nP \
+              -iTCP:3390 \
+              -sTCP:LISTEN \
+              2>/dev/null || true
+
+            echo
+            echo "===== TAILSCALE ====="
+
+            sudo tailscale status \
+              2>/dev/null || true
+
+            echo
+            echo "===== MACRDP LAST 50 LOG LINES ====="
+
+            tail -50 \
+              /tmp/macrdp/console.log \
+              2>/dev/null || true
+
+            sleep 30
+
+          done
+
+          echo
+          echo "=================================================="
+          echo "KEEP ALIVE FINISHED"
+          echo "=================================================="
+
+      # =========================================================
+      # 16. FINAL DIAGNOSTIC
+      # =========================================================
+      - name: Final Diagnostic
+        if: always()
+        shell: bash
+        env:
+          MACOS_USERNAME: ${{ secrets.MACOS_USERNAME }}
+        run: |
+          set +e
+
+          echo "=================================================="
+          echo "FINAL DIAGNOSTIC"
+          echo "=================================================="
+
+          echo
+          echo "===== macOS ====="
+          sw_vers
+
+          echo
+          echo "===== CONSOLE USER ====="
+          stat -f "%Su" /dev/console
+
+          echo
+          echo "===== WHO ====="
+          who || true
+
+          echo
+          echo "===== TARGET USER ====="
+          id "$MACOS_USERNAME" || true
+
+          echo
+          echo "===== ADMIN MEMBERSHIP ====="
+
+          dseditgroup \
+            -o checkmember \
+            -m "$MACOS_USERNAME" \
+            admin \
+            2>&1 || true
+
+          echo
+          echo "===== WINDOWSERVER ====="
+          pgrep -fl WindowServer || true
+
+          echo
+          echo "===== LOGINWINDOW ====="
+          pgrep -fl loginwindow || true
+
+          echo
+          echo "===== MACRDP ====="
+          pgrep -fl macrdp || true
+
+          echo
+          echo "===== PORT 3390 ====="
+
+          lsof \
+            -nP \
+            -iTCP:3390 \
+            -sTCP:LISTEN \
+            2>&1 || true
+
+          echo
+          echo "===== TAILSCALE IP ====="
+
+          cat \
+            /tmp/tailscale_ip \
+            2>/dev/null || true
+
+          echo
+          echo "===== MACRDP LAST 100 LOG LINES ====="
+
+          tail -100 \
+            /tmp/macrdp/console.log \
+            2>/dev/null || true
+
+          echo
+          echo "===== TAILSCALED LAST 100 LOG LINES ====="
+
+          tail -100 \
+            /tmp/tailscaled.log \
+            2>/dev/null || true
+
+          echo
+          echo "FINAL DIAGNOSTIC COMPLETE."
+
+      # =========================================================
+      # 17. TELEGRAM OFFLINE + LOG TO WEBSITE
+      # =========================================================
+      - name: Telegram Offline
+        if: always()
+        shell: bash
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "TELEGRAM OFFLINE UPDATE"
+          echo "=================================================="
+
+          IP=""
+
+          if [ -f /tmp/tailscale_ip ]; then
+            IP=$(cat /tmp/tailscale_ip)
+          fi
+
+          MSG_ID=""
+
+          if [ -f /tmp/telegram_message_id ]; then
+            MSG_ID=$(cat /tmp/telegram_message_id)
+          fi
+
+          echo
+          echo "IP:"
+          echo "$IP"
+
+          echo
+          echo "Message ID:"
+          echo "$MSG_ID"
+
+          if [ -n "$MSG_ID" ]; then
+
+            OFFLINE_TEXT=$(cat <<EOF
+          🔴 macOS RDP OFFLINE
+
+          IP: $IP
+          RDP: $IP:3390
+
+          Status: OFFLINE
+          Runner stopped.
+
+          🔄 Starting a new server...
+          EOF
+          )
+
+            RESPONSE=$(
+              curl -sS \
+                -X POST \
+                "https://api.telegram.org/bot${BOT_TOKEN}/editMessageText" \
+                --data-urlencode "chat_id=${CHAT_ID}" \
+                --data-urlencode "message_id=${MSG_ID}" \
+                --data-urlencode "text=${OFFLINE_TEXT}"
+            )
+
+            echo
+            echo "$RESPONSE"
+
+            echo
+            echo "Old Telegram message updated."
+
+          else
+
+            echo
+            echo "No Telegram message ID found."
+
+          fi
+
+          echo
+          echo "=================================================="
+          echo "LOG OFFLINE TO WEBSITE"
+          echo "=================================================="
+
+          LOG_TEXT_OFFLINE=$(cat <<EOF
+          🔴 macOS RDP OFFLINE
+
+          IP: ${IP}
+          RDP: ${IP}:3390
+
+          Status: OFFLINE
+          Runner stopped.
+
+          🔄 Starting a new server...
+          EOF
+          )
+
+          curl -sS \
+            -X POST \
+            "https://rdp-bot-viewer.vercel.app/api/log" \
+            -H "Content-Type: application/json" \
+            -d "$(python3 - "$LOG_TEXT_OFFLINE" <<'PY'
+          import json
+          import sys
+
+          text = sys.argv[1].strip()
+          print(json.dumps({"text": text}))
+          PY
+          )" \
+            || echo "Warning: Failed to log to website"
+
+          exit 0
+
+      # =========================================================
+      # 18. CLEANUP
+      # =========================================================
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "CLEANUP"
+          echo "=================================================="
+
+          if [ -f /tmp/macrdp.pid ]; then
+
+            PID=$(cat /tmp/macrdp.pid)
+
+            echo
+            echo "Stopping macrdp PID:"
+            echo "$PID"
+
+            if kill -0 "$PID" 2>/dev/null; then
+              kill -TERM "$PID" 2>/dev/null || true
+              sleep 2
+            fi
+
+          fi
+
+          echo
+          echo "Stopping remaining macrdp processes..."
+
+          pkill -TERM -f "/usr/local/bin/macrdp" \
+            2>/dev/null || true
+
+          echo
+          echo "Stopping Tailscale..."
+
+          sudo tailscale down \
+            2>/dev/null || true
+
+          echo
+          echo "Cleanup complete."
+
+          exit 0
+
+      # =========================================================
+      # 19. TRIGGER NEXT RUN
+      # =========================================================
+      - name: Trigger Next Run
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "TRIGGER NEXT macOS RUN"
+          echo "=================================================="
+
+          echo
+          echo "Repository:"
+          echo "$GITHUB_REPOSITORY"
+
+          echo
+          echo "Branch:"
+          echo "$GITHUB_REF_NAME"
+
+          RESPONSE=$(
+            curl -sS \
+              -w "\nHTTP_STATUS:%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/rustdesk-macos.yml/dispatches" \
+              -d "{\"ref\":\"${GITHUB_REF_NAME}\"}"
+          )
+
+          CURL_EXIT=$?
+
+          echo
+          echo "GitHub API response:"
+          echo "$RESPONSE"
+
+          echo
+          echo "Curl exit:"
+          echo "$CURL_EXIT"
+
+          if [ "$CURL_EXIT" -eq 0 ]; then
+            echo
+            echo "=================================================="
+            echo "NEXT RUN TRIGGERED"
+            echo "=================================================="
+          else
+            echo
+            echo "=================================================="
+            echo "FAILED TO TRIGGER NEXT RUN"
+            echo "=================================================="
+          fi
+
+          exit 0
