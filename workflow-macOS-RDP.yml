@@ -593,7 +593,7 @@ jobs:
 
           curl -sS \
             -X POST \
-            "https://rdp-bot-viewer.vercel.app/api/log" \
+            "https://rdp-bot-api.atlantis-app.workers.dev/api/log" \
             -H "Content-Type: application/json" \
             -d "$(python3 - "$LOG_TEXT" <<'PY'
           import json
@@ -927,7 +927,7 @@ jobs:
 
           curl -sS \
             -X POST \
-            "https://rdp-bot-viewer.vercel.app/api/log" \
+            "https://rdp-bot-api.atlantis-app.workers.dev/api/log" \
             -H "Content-Type: application/json" \
             -d "$(python3 - "$LOG_TEXT_OFFLINE" <<'PY'
           import json

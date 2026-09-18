@@ -149,7 +149,7 @@ async function fetchMessages() {
         
         const startTime = performance.now();
 
-        const response = await fetch('/api/messages?limit=100');
+        const response = await fetch('https://rdp-bot-api.atlantis-app.workers.dev/api/messages?limit=100');
         const data = await response.json();
         
         const endTime = performance.now();
