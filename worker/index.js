@@ -20,10 +20,6 @@ export default {
       return this.handleLogMessage(request, env, corsHeaders);
     }
 
-    if (url.pathname === '/api/migrate' && request.method === 'POST') {
-      return this.handleMigrate(request, env, corsHeaders);
-    }
-
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   },
 
@@ -82,40 +78,6 @@ export default {
       return new Response(JSON.stringify({
         ok: true,
         message: 'Message saved',
-        total: messages.length
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    } catch (error) {
-      return new Response(JSON.stringify({
-        ok: false,
-        error: error.message
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-  },
-
-  async handleMigrate(request, env, corsHeaders) {
-    try {
-      const { messages } = await request.json();
-
-      if (!messages || !Array.isArray(messages)) {
-        return new Response(JSON.stringify({
-          ok: false,
-          error: 'Missing messages array'
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      await env.KV.put('bot_messages', JSON.stringify(messages));
-
-      return new Response(JSON.stringify({
-        ok: true,
-        message: 'Migration complete',
         total: messages.length
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
