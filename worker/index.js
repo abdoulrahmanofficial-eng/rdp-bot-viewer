@@ -20,6 +20,14 @@ export default {
       return this.handleLogMessage(request, env, corsHeaders);
     }
 
+    if (url.pathname === '/api/delete' && request.method === 'POST') {
+      return this.handleDelete(request, env, corsHeaders);
+    }
+
+    if (url.pathname === '/api/clear' && request.method === 'POST') {
+      return this.handleClear(env, corsHeaders);
+    }
+
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   },
 
@@ -79,6 +87,64 @@ export default {
         ok: true,
         message: 'Message saved',
         total: messages.length
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: error.message
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  async handleDelete(request, env, corsHeaders) {
+    try {
+      const { id } = await request.json();
+
+      if (!id) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: 'Missing id field'
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const messages = await env.KV.get('bot_messages', { type: 'json' }) || [];
+      const filtered = messages.filter(m => m.id !== id);
+      await env.KV.put('bot_messages', JSON.stringify(filtered));
+
+      return new Response(JSON.stringify({
+        ok: true,
+        message: 'Message deleted',
+        total: filtered.length
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: error.message
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  async handleClear(env, corsHeaders) {
+    try {
+      await env.KV.put('bot_messages', JSON.stringify([]));
+
+      return new Response(JSON.stringify({
+        ok: true,
+        message: 'All messages cleared',
+        total: 0
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
